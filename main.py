@@ -192,7 +192,6 @@ def predict_sum_parity_rule(history):
 
 
 
-
 def predict_additional_hot_digit(history):
     # Rule 9: Cumulative Hot Top-5 method.
     # From Period 25 onward, use ALL entered periods (1..current).
@@ -497,7 +496,8 @@ class NumberCircle(Button):
             self.shine_ellipse = Ellipse()
 
         self.bind(pos=self.update_circle, size=self.update_circle)
-            def update_circle(self, *args):
+
+    def update_circle(self, *args):
         # Calculate dynamic bounds perfectly matching proportions
         ball_size = min(self.width, self.height) * 0.92
         x = self.center_x - ball_size / 2
@@ -950,7 +950,6 @@ class WingoPredictorApp(App):
         self.last_50_count_label.bind(
             size=lambda instance, value: setattr(instance, "text_size", value)
         )
-
         content.add_widget(self.last_50_count_label)
 
         # =================================================
@@ -997,7 +996,7 @@ class WingoPredictorApp(App):
         self.final_label = Label(
             text="FINAL RESULT",
             font_size="23sp",
-                    bold=True,
+            bold=True,
             markup=True,
             color=(
                 0.0,
@@ -1416,7 +1415,7 @@ class WingoPredictorApp(App):
         right_periods = visible_periods[10:]
 
         max_rows = max(
-            len(left_periods), 
+            len(left_periods),
             len(right_periods)
         )
 
@@ -1495,8 +1494,9 @@ class WingoPredictorApp(App):
 
             self.history_grid.add_widget(
                 left_label
-)
-                        # -------------------------------------------
+            )
+
+            # -------------------------------------------
             # RIGHT COLUMN
             # -------------------------------------------
 
