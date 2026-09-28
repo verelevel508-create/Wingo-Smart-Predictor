@@ -29,6 +29,7 @@ def predict_pattern_1(history):
         return "No Prediction"
     p1 = history[-4]
     p3 = history[-2]
+    # New Rule 1 condition: equal 1st and 3rd numbers -> No Prediction.
     if p1 == p3:
         return "No Prediction"
     steps = (p3 - p1) % 10
@@ -134,7 +135,11 @@ def predict_new_combo_rules(history):
         ("Big", "Big", "Small", "Small", "Small"): "Big",
         ("Small", "Big", "Big", "Big", "Small"): "Small",
         ("Big", "Small", "Small", "Small", "Big"): "Big",
-        ("Small", "Small", "Big", "Big", "Big"): "Small"
+        ("Small", "Small", "Big", "Big", "Big"): "Small",
+        ("Small", "Small", "Small", "Big", "Big"): "Small",
+        ("Big", "Big", "Big", "Small", "Small"): "Big",
+        # Point 12: Big, Big, Small, Big, Big -> Small
+        ("Big", "Big", "Small", "Big", "Big"): "Small"
     }
     return sequences.get(tuple(last_5), "No Prediction")
 
@@ -152,44 +157,286 @@ def predict_sequence_rule(history):
     return "No Prediction"
 
 
-def predict_missing_average_rule(history):
-    # Rule 7 starts from the 21st period.
-    # The first 20 periods are the initial history.
-    if len(history) < 21:
+
+def predict_streak_rule(history):
+    # Rule 7: Predict only once when exactly 3 consecutive
+    # Bigs or Smalls are completed. If a 4th same-side result
+    # continues the streak, return No Prediction.
+    if len(history) < 3:
         return "No Prediction"
 
-    votes = []
+    last_three = [get_big_small(n) for n in history[-3:]]
 
-    for digit in range(10):
-        positions = [i for i, n in enumerate(history) if n == digit]
-        if len(positions) < 2:
-            continue
-
-        # Current missing count from the latest occurrence.
-        current_missing = len(history) - 1 - positions[-1]
-
-        # Dynamically use every completed gap between occurrences.
-        intervals = [
-            positions[i] - positions[i - 1] - 1
-            for i in range(1, len(positions))
-        ]
-
-        average_missing = sum(intervals) / len(intervals)
-
-        if current_missing == average_missing:
-            votes.append("Small" if digit <= 4 else "Big")
-
-    if not votes:
+    if len(set(last_three)) != 1:
         return "No Prediction"
 
-    big_count = votes.count("Big")
-    small_count = votes.count("Small")
+    # A 4th consecutive result on the same side means the
+    # one-time prediction for the 3-streak has already been used.
+    if len(history) >= 4:
+        previous = get_big_small(history[-4])
+        if previous == last_three[0]:
+            return "No Prediction"
 
+    if last_three[0] == "Small":
+        return "Big"
+    return "Small"
+
+def predict_sum_parity_rule(history):
+    # Rule 8: Add the last two period results.
+    # Odd sum -> Big, Even sum -> Small.
+    if len(history) < 2:
+        return "No Prediction"
+
+    total = history[-2] + history[-1]
+    return "Big" if total % 2 == 1 else "Small"
+
+
+
+
+def predict_additional_hot_digit(history):
+    # Rule 9: Cumulative Hot Top-5 method.
+    # From Period 25 onward, use ALL entered periods (1..current).
+    # Take the 5 most frequent numbers.
+    # More Big numbers in the top 5 -> opposite Small.
+    # More Small numbers in the top 5 -> opposite Big.
+    if len(history) < 25:
+        return "No Prediction"
+
+    data = history[:]
+    counts = {n: data.count(n) for n in range(10)}
+
+    # Frequency first; when frequencies tie, the more recently
+    # appearing number is selected first.
+    candidates = sorted(
+        range(10),
+        key=lambda n: (
+            counts[n],
+            max((i for i, x in enumerate(data) if x == n), default=-1)
+        ),
+        reverse=True
+    )[:5]
+
+    big_count = sum(1 for n in candidates if 5 <= n <= 9)
+    small_count = sum(1 for n in candidates if 0 <= n <= 4)
+
+    if big_count > small_count:
+        return "Small"
+    if small_count > big_count:
+        return "Big"
+    return "No Prediction"
+
+
+def predict_additional_odd_even_last2(history):
+    # Rule 10: last-two parity majority.
+    if len(history) < 2:
+        return "No Prediction"
+    a, b = history[-2], history[-1]
+    if a % 2 != b % 2:
+        return "No Prediction"
+    return "Big" if a % 2 == 1 else "Small"
+
+
+def predict_additional_missing_number(history):
+    # Rule 11: For each completed 10-period block, inspect only that block.
+    # Reuse its prediction for the block-end period and the next two periods.
+    total = len(history)
+    block_end = (total // 10) * 10
+    if block_end < 10 or total - block_end not in (0, 1, 2):
+        return "No Prediction"
+
+    block = history[block_end - 10:block_end]
+    missing = [n for n in range(10) if n not in block]
+    if not missing:
+        return "No Prediction"
+
+    big_count = sum(1 for n in missing if n >= 5)
+    small_count = len(missing) - big_count
     if big_count > small_count:
         return "Big"
     if small_count > big_count:
         return "Small"
     return "No Prediction"
+
+
+def predict_additional_gap_number(history):
+    # Rule 12: Gap method using the highest-gap digit (last 20).
+    if len(history) < 20:
+        return "No Prediction"
+    gaps = get_gap_numbers(history)
+    if not gaps:
+        return "No Prediction"
+    return get_big_small(gaps[0][0])
+
+
+def predict_additional_position_middle(history):
+    # Rule 13: Middle position of the latest 20 periods.
+    if len(history) < 20:
+        return "No Prediction"
+    middle = get_position_numbers(history).get("Middle")
+    if middle is None:
+        return "No Prediction"
+    return get_big_small(middle)
+
+
+def predict_additional_sum_number(history):
+    # Rule 14: Sum method from the latest two numbers, reduced to 0-9.
+    if len(history) < 2:
+        return "No Prediction"
+    value = get_sum_number(history)
+    if value is None:
+        return "No Prediction"
+    return get_big_small(value)
+
+
+def predict_additional_difference_number(history):
+    # Rule 15: Difference method from the latest two numbers, reduced to 0-9.
+    if len(history) < 2:
+        return "No Prediction"
+    value = get_difference_number(history)
+    if value is None:
+        return "No Prediction"
+    return get_big_small(value)
+
+
+
+def get_last_20(history):
+    return history[-20:] if len(history) >= 20 else []
+
+
+def get_missing_numbers(history):
+    data = get_last_20(history)
+    if len(data) < 20:
+        return []
+    present = set(data)
+    return [n for n in range(10) if n not in present]
+
+
+def get_gap_numbers(history):
+    data = get_last_20(history)
+    if not data:
+        return []
+    result = []
+    for n in range(10):
+        if n in data:
+            gap = len(data) - 1 - max(i for i, x in enumerate(data) if x == n)
+        else:
+            gap = len(data)
+        result.append((n, gap))
+    result.sort(key=lambda x: (-x[1], x[0]))
+    return result
+
+
+def get_pair_patterns(history):
+    data = get_last_20(history)
+    pairs = {}
+    for i in range(len(data) - 1):
+        pair = (data[i], data[i + 1])
+        pairs[pair] = pairs.get(pair, 0) + 1
+    return sorted(pairs.items(), key=lambda x: (-x[1], x[0]))
+
+
+def get_position_numbers(history):
+    data = get_last_20(history)
+    if not data:
+        return {"First": None, "Middle": None, "Last": None}
+    return {
+        "First": data[0],
+        "Middle": data[len(data) // 2],
+        "Last": data[-1]
+    }
+
+
+def get_sum_number(history):
+    data = get_last_20(history)
+    if len(data) < 2:
+        return None
+    return (data[-2] + data[-1]) % 10
+
+
+def get_difference_number(history):
+    data = get_last_20(history)
+    if len(data) < 2:
+        return None
+    return abs(data[-1] - data[-2]) % 10
+
+
+def get_last_50_big_small_counts(history):
+    """Cumulative Big/Small count starting from Period 50.
+    Period 50 counts 1-50; Period 51 counts 1-51;
+    Period 52 counts 1-52, and so on indefinitely.
+    """
+    if len(history) < 50:
+        return None
+
+    big_count = sum(1 for n in history if get_big_small(n) == "Big")
+    small_count = len(history) - big_count
+    return big_count, small_count
+
+def calculate_backup_number(history):
+    if len(history) < 3:
+        return None
+
+    alternative_period = history[-3]
+    latest_period = history[-1]
+    gap = (latest_period - alternative_period) % 10
+
+    return (latest_period + gap) % 10
+
+
+def backup_matches_rule_1(history, rule_1_prediction, rule_3_prediction):
+    if rule_1_prediction not in ("Big", "Small"):
+        return False
+    if rule_3_prediction not in ("Big", "Small"):
+        return False
+    if rule_1_prediction != rule_3_prediction:
+        return False
+
+    backup_number = calculate_backup_number(history)
+    if backup_number is None:
+        return False
+
+    backup_prediction = get_big_small(backup_number)
+    return (
+        rule_1_prediction == backup_prediction
+        and rule_3_prediction == backup_prediction
+    )
+
+
+def high_chances_additional_main_rule(history, rule_1_prediction):
+    # HIGH CHANCES applies when the current period itself is a trigger
+    # OR when the immediately previous period was a trigger.
+    # Trigger numbers: 6, 3, 1, 8.
+    # Rule 1 Small + Backup 0-4 -> HIGH CHANCES.
+    # Rule 1 Big   + Backup 5-9 -> HIGH CHANCES.
+    # Otherwise -> no HIGH CHANCES.
+    if not history or rule_1_prediction not in ("Big", "Small"):
+        return False
+
+    trigger_numbers = {6, 3, 1, 8}
+
+    eligible = (
+        history[-1] in trigger_numbers
+        or (
+            len(history) >= 2
+            and history[-2] in trigger_numbers
+        )
+    )
+
+    if not eligible:
+        return False
+
+    backup_number = calculate_backup_number(history)
+    if backup_number is None:
+        return False
+
+    if rule_1_prediction == "Small" and 0 <= backup_number <= 4:
+        return True
+
+    if rule_1_prediction == "Big" and 5 <= backup_number <= 9:
+        return True
+
+    return False
+
 
 
 def calculate_final_result(predictions):
@@ -201,29 +448,6 @@ def calculate_final_result(predictions):
     if big_c > small_c: return "Big"
     if small_c > big_c: return "Small"
     return "Big and Small"
-
-
-def calculate_backup_number(history):
-    """Calculate the backup number from the last period and its alternative.
-
-    For the next prediction, compare the latest period with the period
-    two places before it (the alternative period). Count the clockwise
-    gap from the alternative number to the latest number. Then move
-    forward by that same gap from the latest number.
-
-    Examples:
-      1, 4, 3 -> alternative 1 and latest 3: gap 2, result 5.
-      8, 9, 3 -> alternative 8 and latest 3: gap 5, result 8.
-      3, 8, 3 -> alternative 3 and latest 3: gap 0, result 3.
-    """
-    if len(history) < 3:
-        return None
-
-    alternative_period = history[-3]
-    latest_period = history[-1]
-    gap = (latest_period - alternative_period) % 10
-
-    return (latest_period + gap) % 10
 
 
 # =========================================================
@@ -273,8 +497,7 @@ class NumberCircle(Button):
             self.shine_ellipse = Ellipse()
 
         self.bind(pos=self.update_circle, size=self.update_circle)
-
-    def update_circle(self, *args):
+            def update_circle(self, *args):
         # Calculate dynamic bounds perfectly matching proportions
         ball_size = min(self.width, self.height) * 0.92
         x = self.center_x - ball_size / 2
@@ -647,9 +870,9 @@ class WingoPredictorApp(App):
             font_size="20sp",
             bold=True,
             color=(
-                0.0,
-                0.0,
-                0.55,
+                0.03,
+                0.15,
+                0.45,
                 1
             ),
             size_hint_y=None,
@@ -698,12 +921,44 @@ class WingoPredictorApp(App):
             history_scroll
         )
 
+
         # =================================================
-        # 7 PREDICTION RULES
+        # LAST 50 BIG / SMALL COUNT
+        # =================================================
+
+        self.last_50_count_title = Label(
+            text="BIG / SMALL COUNT FROM PERIOD 1",
+            font_size="18sp",
+            bold=True,
+            color=(0.03, 0.15, 0.45, 1),
+            size_hint_y=None,
+            height=dp(36)
+        )
+
+        content.add_widget(self.last_50_count_title)
+
+        self.last_50_count_label = Label(
+            text="Waiting... Count starts from Period 50",
+            font_size="16sp",
+            bold=True,
+            color=(0.70, 0.50, 0, 1),
+            size_hint_y=None,
+            height=dp(34),
+            halign="left",
+            valign="middle"
+        )
+        self.last_50_count_label.bind(
+            size=lambda instance, value: setattr(instance, "text_size", value)
+        )
+
+        content.add_widget(self.last_50_count_label)
+
+        # =================================================
+        # 15 PREDICTION RULES
         # =================================================
 
         rules_title = Label(
-            text="7 PREDICTION RULES",
+            text="15 PREDICTION RULES",
             font_size="20sp",
             bold=True,
             color=(
@@ -716,10 +971,6 @@ class WingoPredictorApp(App):
             height=dp(42)
         )
 
-        content.add_widget(
-            rules_title
-        )
-
         self.rules_box = BoxLayout(
             orientation="vertical",
             spacing=dp(7),
@@ -730,10 +981,6 @@ class WingoPredictorApp(App):
             minimum_height=self.rules_box.setter(
                 "height"
             )
-        )
-
-        content.add_widget(
-            self.rules_box
         )
 
         # =================================================
@@ -749,13 +996,13 @@ class WingoPredictorApp(App):
 
         self.final_label = Label(
             text="FINAL RESULT",
-            markup=True,
             font_size="23sp",
-            bold=True,
+                    bold=True,
+            markup=True,
             color=(
-                1,
-                0.35,
-                0,
+                0.0,
+                0.65,
+                0.20,
                 1
             ),
             size_hint_y=None,
@@ -771,10 +1018,16 @@ class WingoPredictorApp(App):
         # =================================================
 
         self.backup_label = Label(
-            text="[color=008B8B]BACKUP NUMBER:[/color] --",
-            markup=True,
-            font_size="19sp",
+            text="BACKUP NUMBER",
+            font_size="20sp",
             bold=True,
+            markup=True,
+            color=(
+                0.10,
+                0.30,
+                0.75,
+                1
+            ),
             size_hint_y=None,
             height=dp(40)
         )
@@ -784,13 +1037,46 @@ class WingoPredictorApp(App):
         )
 
         # =================================================
-        # RESET BUTTON
+        # HIGH CHANCES
         # =================================================
 
-        # RESET + LAST ENTRY DELETE
-        reset_delete_box = BoxLayout(
+        self.high_chances_label = Label(
+            text="",
+            font_size="21sp",
+            bold=True,
+            color=(
+                0.95,
+                0.45,
+                0.00,
+                1
+            ),
+            size_hint_y=None,
+            height=dp(40)
+        )
+
+        content.add_widget(
+            self.high_chances_label
+        )
+
+        # =================================================
+        # 15 PREDICTION RULES
+        # =================================================
+
+        content.add_widget(
+            rules_title
+        )
+
+        content.add_widget(
+            self.rules_box
+        )
+
+        # =================================================
+        # RESET + DELETE LAST (UNCHANGED RESET FUNCTION)
+        # =================================================
+
+        reset_row = BoxLayout(
             orientation="horizontal",
-            spacing=dp(5),
+            spacing=dp(4),
             size_hint_y=None,
             height=dp(48)
         )
@@ -822,14 +1108,14 @@ class WingoPredictorApp(App):
 
         delete_button = Button(
             text="×",
-            font_size="24sp",
+            font_size="25sp",
             bold=True,
             size_hint_x=0.25,
             background_normal="",
             background_color=(
-                0.45,
-                0.02,
-                0.02,
+                0.55,
+                0.00,
+                0.00,
                 1
             ),
             color=(
@@ -842,19 +1128,20 @@ class WingoPredictorApp(App):
 
         delete_button.bind(
             on_release=lambda x:
-            self.delete_last()
+            self.delete_last_number()
         )
 
-        reset_delete_box.add_widget(reset_button)
-        reset_delete_box.add_widget(delete_button)
+        reset_row.add_widget(reset_button)
+        reset_row.add_widget(delete_button)
 
-        content.add_widget(reset_delete_box)
+        content.add_widget(reset_row)
 
         # =================================================
         # INITIAL DISPLAY
         # =================================================
 
         self.update_history_display()
+        self.update_last_50_count()
 
         self.clear_predictions()
 
@@ -889,6 +1176,7 @@ class WingoPredictorApp(App):
         )
 
         self.update_history_display()
+        self.update_last_50_count()
 
         # -----------------------------------------------
         # WAITING
@@ -913,23 +1201,18 @@ class WingoPredictorApp(App):
                 1
             )
 
-            self.clear_predictions()
-
-            backup_number = calculate_backup_number(self.history)
-            if backup_number is not None:
-                self.backup_label.text = (
-                    "[color=008B8B]BACKUP NUMBER:[/color] "
-                    + "[color=000000]"
-                    + str(backup_number)
-                    + "[/color]"
-                )
+            p11_early = predict_additional_missing_number(self.history)
+            if p11_early != "No Prediction":
+                early_predictions = ["No Prediction"] * 15
+                early_predictions[10] = p11_early
+                self.show_predictions(early_predictions)
             else:
-                self.backup_label.text = "[color=008B8B]BACKUP NUMBER:[/color] --"
+                self.clear_predictions()
 
             return
 
         # -----------------------------------------------
-        # 7 RULES
+        # 15 RULES
         # -----------------------------------------------
 
         p1 = predict_pattern_1(
@@ -957,18 +1240,26 @@ class WingoPredictorApp(App):
             self.history
         )
 
-        p7 = predict_missing_average_rule(
+        p7 = predict_streak_rule(
             self.history
         )
 
+        p8 = predict_sum_parity_rule(
+            self.history
+        )
+
+        # Active Rules: 1-8 + updated Rule 9 + Rules 10-15.
+        p9 = predict_additional_hot_digit(self.history)
+        p10 = predict_additional_odd_even_last2(self.history)
+        p11 = predict_additional_missing_number(self.history)
+        p12 = predict_additional_gap_number(self.history)
+        p13 = predict_additional_position_middle(self.history)
+        p14 = predict_additional_sum_number(self.history)
+        p15 = predict_additional_difference_number(self.history)
+
         predictions = [
-            p1,
-            p2,
-            p3,
-            p4,
-            p5,
-            p6,
-            p7
+            p1, p2, p3, p4, p5, p6, p7, p8,
+            p9, p10, p11, p12, p13, p14, p15
         ]
 
         self.show_predictions(
@@ -984,27 +1275,101 @@ class WingoPredictorApp(App):
         )
 
         if final == "Big":
-            self.final_label.text = (
-                "[color=33AA33]FINAL RESULT:[/color] "
-                "[color=FFC000]Big[/color]"
-            )
+            final_result_color = "FFD900"
         elif final == "Small":
-            self.final_label.text = (
-                "[color=33AA33]FINAL RESULT:[/color] "
-                "[color=66CCFF]Small[/color]"
-            )
+            final_result_color = "33BFFF"
         else:
-            self.final_label.text = (
-                "[color=33AA33]FINAL RESULT:[/color] "
-                + final
+            final_result_color = "00A633"
+
+        self.final_label.text = (
+            "[color=#00A633]FINAL RESULT: [/color]"
+            + "[color=#"
+            + final_result_color
+            + "][b]"
+            + final
+            + "[/b][/color]"
+        )
+        self.final_label.color = (0.0, 0.65, 0.20, 1)
+
+        # -----------------------------------------------
+        # BACKUP NUMBER + HIGH CHANCES
+        # -----------------------------------------------
+
+        backup_number = calculate_backup_number(
+            self.history
+        )
+
+        if backup_number is None:
+            self.backup_label.text = "BACKUP NUMBER"
+        else:
+            backup_colors = {
+                0: "9B00FF", 1: "00B34D", 2: "E60015",
+                3: "00B34D", 4: "E60015", 5: "9B00FF",
+                6: "E60015", 7: "00B34D", 8: "E60015",
+                9: "00B34D"
+            }
+            self.backup_label.text = (
+                "BACKUP NUMBER: [color=#"
+                + backup_colors[backup_number]
+                + "][b]"
+                + str(backup_number)
+                + "[/b][/color]"
             )
 
-        self.final_label.color = (
-            0.20,
-            0.67,
-            0.20,
-            1
-        )
+        high_chances = None
+
+        # HIGH CHANCES is shown only when FINAL RESULT is Big or Small.
+        # If FINAL RESULT is Big and Small, HIGH CHANCES is not shown.
+        if (
+            final in ("Big", "Small")
+            and high_chances_additional_main_rule(
+                self.history,
+                p1
+            )
+        ):
+            high_chances = p1
+
+        if high_chances is not None:
+            self.high_chances_label.text = "HIGH CHANCES"
+
+            # Count only actual Big/Small predictions from Rules 1-15.
+            # No Prediction values are ignored.
+            valid_predictions = [
+                prediction
+                for prediction in predictions
+                if prediction in ("Big", "Small")
+            ]
+
+            big_count = valid_predictions.count("Big")
+            small_count = valid_predictions.count("Small")
+            total_valid = big_count + small_count
+
+            # Reverse only when the dominant prediction is below 80%.
+            # Exactly 80% (or higher) must NOT be reversed.
+            should_reverse = False
+            if total_valid > 0:
+                dominant_count = max(big_count, small_count)
+                if dominant_count * 100 < total_valid * 80:
+                    should_reverse = True
+
+            if should_reverse:
+                if final == "Big":
+                    final = "Small"
+                elif final == "Small":
+                    final = "Big"
+
+                if final == "Big":
+                    final_result_color = "FFD900"
+                elif final == "Small":
+                    final_result_color = "33BFFF"
+
+                self.final_label.text = (
+                    "[color=#00A633]FINAL RESULT: [/color]"
+                    + "[color=#" + final_result_color + "][b]"
+                    + final + "[/b][/color]"
+                )
+        else:
+            self.high_chances_label.text = ""
 
         self.result_label.text = (
             "Prediction Ready"
@@ -1016,17 +1381,6 @@ class WingoPredictorApp(App):
             0.05,
             1
         )
-
-        backup_number = calculate_backup_number(self.history)
-        if backup_number is not None:
-            self.backup_label.text = (
-                "[color=008B8B]BACKUP NUMBER:[/color] "
-                + "[color=000000]"
-                + str(backup_number)
-                + "[/color]"
-            )
-        else:
-            self.backup_label.text = "[color=008B8B]BACKUP NUMBER:[/color] --"
 
     # =====================================================
     # HISTORY DISPLAY
@@ -1062,7 +1416,7 @@ class WingoPredictorApp(App):
         right_periods = visible_periods[10:]
 
         max_rows = max(
-            len(left_periods),
+            len(left_periods), 
             len(right_periods)
         )
 
@@ -1080,40 +1434,50 @@ class WingoPredictorApp(App):
 
                 period_number = index + 1
 
-                number_color_hex = {
-                    0: "8000E6", 1: "00B359", 2: "E60D14",
-                    3: "00B359", 4: "E60D14", 5: "8000E6",
-                    6: "E60D14", 7: "00B359", 8: "E60D14",
-                    9: "00B359"
-                }[number]
-                big_small = get_big_small(number)
-                big_small_color_hex = "FFC000" if big_small == "Big" else "66CCFF"
                 text = (
-                    "[color=00008B]Period "
+                    "Period "
                     + str(period_number)
-                    + " :[/color] "
-                    + "[color=" + number_color_hex + "]"
+                    + " : "
                     + str(number)
-                    + "[/color]  "
-                    + "[color=" + big_small_color_hex + "]"
-                    + big_small
-                    + "[/color]"
+                    + "  "
+                    + get_big_small(number)
                 )
 
             else:
 
                 text = ""
 
+            number_color = {
+                0: "9B00FF",
+                1: "00B34D",
+                2: "E60015",
+                3: "00B34D",
+                4: "E60015",
+                5: "9B00FF",
+                6: "E60015",
+                7: "00B34D",
+                8: "E60015",
+                9: "00B34D"
+            }
+            big_small_color = "FFD900" if number >= 5 else "33BFFF"
+            history_markup = (
+                "[color=#30303D]Period "
+                + str(period_number)
+                + " : [/color][color=#"
+                + number_color[number]
+                + "][b]"
+                + str(number)
+                + "[/b][/color]  [color=#"
+                + big_small_color
+                + "][b]"
+                + get_big_small(number)
+                + "[/b][/color]"
+            ) if text else ""
+
             left_label = Label(
-                text=text,
+                text=history_markup,
                 markup=True,
                 font_size="14sp",
-                color=(
-                    0.05,
-                    0.05,
-                    0.15,
-                    1
-                ),
                 halign="left",
                 valign="middle",
                 size_hint_y=None,
@@ -1131,54 +1495,38 @@ class WingoPredictorApp(App):
 
             self.history_grid.add_widget(
                 left_label
-            )
-
-            # -------------------------------------------
+)
+                        # -------------------------------------------
             # RIGHT COLUMN
             # -------------------------------------------
 
             if row < len(right_periods):
 
-                index = right_periods[row]
+                right_index = right_periods[row]
+                right_number = self.history[right_index]
+                right_period_number = right_index + 1
+                right_big_small_color = "FFD900" if right_number >= 5 else "33BFFF"
 
-                number = self.history[index]
-
-                period_number = index + 1
-
-                number_color_hex = {
-                    0: "8000E6", 1: "00B359", 2: "E60D14",
-                    3: "00B359", 4: "E60D14", 5: "8000E6",
-                    6: "E60D14", 7: "00B359", 8: "E60D14",
-                    9: "00B359"
-                }[number]
-                big_small = get_big_small(number)
-                big_small_color_hex = "FFC000" if big_small == "Big" else "66CCFF"
-                text = (
-                    "[color=00008B]Period "
-                    + str(period_number)
-                    + " :[/color] "
-                    + "[color=" + number_color_hex + "]"
-                    + str(number)
-                    + "[/color]  "
-                    + "[color=" + big_small_color_hex + "]"
-                    + big_small
-                    + "[/color]"
+                right_history_markup = (
+                    "[color=#30303D]Period "
+                    + str(right_period_number)
+                    + " : [/color][color=#"
+                    + number_color[right_number]
+                    + "][b]"
+                    + str(right_number)
+                    + "[/b][/color]  [color=#"
+                    + right_big_small_color
+                    + "][b]"
+                    + get_big_small(right_number)
+                    + "[/b][/color]"
                 )
-
             else:
-
-                text = ""
+                right_history_markup = ""
 
             right_label = Label(
-                text=text,
+                text=right_history_markup,
                 markup=True,
                 font_size="14sp",
-                color=(
-                    0.05,
-                    0.05,
-                    0.15,
-                    1
-                ),
                 halign="left",
                 valign="middle",
                 size_hint_y=None,
@@ -1198,6 +1546,34 @@ class WingoPredictorApp(App):
                 right_label
             )
 
+
+    # =====================================================
+    # LAST 50 BIG / SMALL COUNT DISPLAY
+    # =====================================================
+
+    def update_last_50_count(self):
+        counts = get_last_50_big_small_counts(self.history)
+
+        if counts is None:
+            remaining = 50 - len(self.history)
+            self.last_50_count_label.text = (
+                "Waiting... Count starts from Period 50 ("
+                + str(remaining)
+                + " more)"
+            )
+            self.last_50_count_label.color = (0.70, 0.50, 0, 1)
+            return
+
+        big_count, small_count = counts
+        current_period = len(self.history)
+        self.last_50_count_label.text = (
+            "PERIOD " + str(current_period)
+            + " (1-" + str(current_period) + "): "
+            + "BIG: " + str(big_count)
+            + "    SMALL: " + str(small_count)
+        )
+        self.last_50_count_label.color = (0.03, 0.15, 0.45, 1)
+
     # =====================================================
     # CLEAR RULES
     # =====================================================
@@ -1206,7 +1582,7 @@ class WingoPredictorApp(App):
 
         self.rules_box.clear_widgets()
 
-        for i in range(1, 8):
+        for i in range(1, 16):
 
             rule_label = Label(
                 text=(
@@ -1218,7 +1594,7 @@ class WingoPredictorApp(App):
                 color=(
                     1.0,
                     0.20,
-                    0.60,
+                    0.65,
                     1
                 ),
                 size_hint_y=None,
@@ -1246,7 +1622,7 @@ class WingoPredictorApp(App):
                 result_label
             )
 
-            if i < 7:
+            if i < 15:
 
                 self.rules_box.add_widget(
                     Widget(
@@ -1281,7 +1657,7 @@ class WingoPredictorApp(App):
                 color=(
                     1.0,
                     0.20,
-                    0.60,
+                    0.65,
                     1
                 ),
                 size_hint_y=None,
@@ -1291,17 +1667,17 @@ class WingoPredictorApp(App):
             if prediction == "Big":
 
                 prediction_color = (
-                    1,
-                    0.75,
-                    0,
+                    1.0,
+                    0.85,
+                    0.0,
                     1
                 )
 
             elif prediction == "Small":
 
                 prediction_color = (
-                    0.40,
-                    0.80,
+                    0.20,
+                    0.75,
                     1.0,
                     1
                 )
@@ -1332,7 +1708,7 @@ class WingoPredictorApp(App):
                 result_label
             )
 
-            if i < 7:
+            if i < 15:
 
                 self.rules_box.add_widget(
                     Widget(
@@ -1342,18 +1718,21 @@ class WingoPredictorApp(App):
                 )
 
     # =====================================================
-    # DELETE LAST ENTRY
+    # DELETE LAST NUMBER
     # =====================================================
 
-    def delete_last(self):
+    def delete_last_number(self):
 
         if not self.history:
             return
 
         self.history.pop()
-        self.period_counts.pop()
+
+        if self.period_counts:
+            self.period_counts.pop()
 
         self.update_history_display()
+        self.update_last_50_count()
 
         if len(self.history) < 20:
             remaining = 20 - len(self.history)
@@ -1361,73 +1740,124 @@ class WingoPredictorApp(App):
                 "Waiting... " + str(remaining) + " more"
             )
             self.result_label.color = (
-                0.70, 0.50, 0, 1
+                0.70,
+                0.50,
+                0,
+                1
             )
-            self.clear_predictions()
             self.final_label.text = "FINAL RESULT"
-            self.final_label.color = (
-                0.20, 0.67, 0.20, 1
-            )
-            backup_number = calculate_backup_number(self.history)
-            if backup_number is not None:
-                self.backup_label.text = (
-                    "[color=008B8B]BACKUP NUMBER:[/color] "
-                    + "[color=000000]"
-                    + str(backup_number)
-                    + "[/color]"
-                )
+            self.backup_label.text = "BACKUP NUMBER"
+            self.high_chances_label.text = ""
+            p11_early = predict_additional_missing_number(self.history)
+            if p11_early != "No Prediction":
+                early_predictions = ["No Prediction"] * 15
+                early_predictions[10] = p11_early
+                self.show_predictions(early_predictions)
             else:
-                self.backup_label.text = "[color=008B8B]BACKUP NUMBER:[/color] --"
+                self.clear_predictions()
             return
 
-        predictions = [
-            predict_pattern_1(self.history),
-            predict_pattern_2(self.history, self.period_counts),
-            predict_pattern_3(self.history),
-            predict_pattern_4(self.history),
-            predict_new_combo_rules(self.history),
-            predict_sequence_rule(self.history),
-            predict_missing_average_rule(self.history)
-        ]
-
+        # Recalculate exactly as if the deleted period had never been entered.
+        p1 = predict_pattern_1(self.history)
+        p2 = predict_pattern_2(self.history, self.period_counts)
+        p3 = predict_pattern_3(self.history)
+        p4 = predict_pattern_4(self.history)
+        p5 = predict_new_combo_rules(self.history)
+        p6 = predict_sequence_rule(self.history)
+        p7 = predict_streak_rule(self.history)
+        p8 = predict_sum_parity_rule(self.history)
+        p9 = predict_additional_hot_digit(self.history)
+        p10 = predict_additional_odd_even_last2(self.history)
+        p11 = predict_additional_missing_number(self.history)
+        p12 = predict_additional_gap_number(self.history)
+        p13 = predict_additional_position_middle(self.history)
+        p14 = predict_additional_sum_number(self.history)
+        p15 = predict_additional_difference_number(self.history)
+        predictions = [p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15]
         self.show_predictions(predictions)
 
         final = calculate_final_result(predictions)
-
         if final == "Big":
-            self.final_label.text = (
-                "[color=33AA33]FINAL RESULT:[/color] "
-                "[color=FFC000]Big[/color]"
-            )
+            final_result_color = "FFD900"
         elif final == "Small":
-            self.final_label.text = (
-                "[color=33AA33]FINAL RESULT:[/color] "
-                "[color=66CCFF]Small[/color]"
-            )
+            final_result_color = "33BFFF"
         else:
-            self.final_label.text = (
-                "[color=33AA33]FINAL RESULT:[/color] " + final
-            )
-
-        self.final_label.color = (
-            0.20, 0.67, 0.20, 1
+            final_result_color = "00A633"
+        self.final_label.text = (
+            "[color=#00A633]FINAL RESULT: [/color]"
+            + "[color=#" + final_result_color + "][b]"
+            + final + "[/b][/color]"
         )
-
-        self.result_label.text = "Prediction Ready"
-        self.result_label.color = (
-            0, 0.35, 0.05, 1
-        )
+        self.final_label.color = (0.0, 0.65, 0.20, 1)
 
         backup_number = calculate_backup_number(self.history)
-        if backup_number is not None:
-            self.backup_label.text = (
-                "[color=008B8B]BACKUP NUMBER:[/color] "
-                + "[color=000000]"
-                + str(backup_number)
-                + "[/color]"
-            )
+        if backup_number is None:
+            self.backup_label.text = "BACKUP NUMBER"
         else:
-            self.backup_label.text = "[color=008B8B]BACKUP NUMBER:[/color] --"
+            backup_colors = {
+                0: "9B00FF", 1: "00B34D", 2: "E60015",
+                3: "00B34D", 4: "E60015", 5: "9B00FF",
+                6: "E60015", 7: "00B34D", 8: "E60015",
+                9: "00B34D"
+            }
+            self.backup_label.text = (
+                "BACKUP NUMBER: [color=#"
+                + backup_colors[backup_number]
+                + "][b]" + str(backup_number)
+                + "[/b][/color]"
+            )
+
+        high_chances = None
+        if (
+            final in ("Big", "Small")
+            and high_chances_additional_main_rule(self.history, p1)
+        ):
+            high_chances = p1
+
+        if high_chances is not None:
+            self.high_chances_label.text = "HIGH CHANCES"
+
+            # Count only actual Big/Small predictions from Rules 1-15.
+            # No Prediction values are ignored.
+            valid_predictions = [
+                prediction
+                for prediction in predictions
+                if prediction in ("Big", "Small")
+            ]
+
+            big_count = valid_predictions.count("Big")
+            small_count = valid_predictions.count("Small")
+            total_valid = big_count + small_count
+
+            # Reverse only when the dominant prediction is below 80%.
+            # Exactly 80% (or higher) must NOT be reversed.
+            should_reverse = False
+            if total_valid > 0:
+                dominant_count = max(big_count, small_count)
+                if dominant_count * 100 < total_valid * 80:
+                    should_reverse = True
+
+            if should_reverse:
+                if final == "Big":
+                    final = "Small"
+                elif final == "Small":
+                    final = "Big"
+
+                if final == "Big":
+                    final_result_color = "FFD900"
+                elif final == "Small":
+                    final_result_color = "33BFFF"
+
+                self.final_label.text = (
+                    "[color=#00A633]FINAL RESULT: [/color]"
+                    + "[color=#" + final_result_color + "][b]"
+                    + final + "[/b][/color]"
+                )
+        else:
+            self.high_chances_label.text = ""
+
+        self.result_label.text = "Prediction Ready"
+        self.result_label.color = (0, 0.35, 0.05, 1)
 
     # =====================================================
     # RESET
@@ -1455,15 +1885,17 @@ class WingoPredictorApp(App):
         )
 
         self.final_label.color = (
-            0.20,
-            0.67,
-            0.20,
+            1,
+            0.35,
+            0,
             1
         )
 
-        self.backup_label.text = "[color=008B8B]BACKUP NUMBER:[/color] --"
+        self.backup_label.text = "BACKUP NUMBER"
+        self.high_chances_label.text = ""
 
         self.update_history_display()
+        self.update_last_50_count()
 
         self.clear_predictions()
 
